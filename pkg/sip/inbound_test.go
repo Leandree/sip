@@ -1115,3 +1115,60 @@ func TestInboundByeOverInviteConnection(t *testing.T) {
 		require.False(t, inviteConnOpen(ic))
 	})
 }
+
+func TestIsPrivateContactBehindNAT(t *testing.T) {
+	for _, tc := range []struct {
+		contact, src string
+		exp          bool
+	}{
+		{"192.168.1.10", "203.0.113.7:40123", true},
+		{"10.0.0.5", "203.0.113.7:5060", true},
+		{"172.16.0.4", "[::ffff:203.0.113.7]:5060", true},
+		{"[fd00::1]", "[2001:db8::1]:5060", true},
+		{"203.0.113.7", "203.0.113.7:40123", false},    // public Contact
+		{"pbx.example.com", "203.0.113.7:5060", false}, // hostname
+		{"192.168.1.10", "192.168.1.10:5060", false},   // peer on a private network
+		{"192.168.1.10", "10.0.0.2:5060", false},
+		{"192.168.1.10", "", false},
+	} {
+		require.Equal(t, tc.exp, isPrivateContactBehindNAT(tc.contact, tc.src), "contact %q, src %q", tc.contact, tc.src)
+	}
+}
+
+// A PBX behind NAT announces its private address in Contact. With ignore_local_addr_in_contact,
+// BYE and REFER go to the address the INVITE came from, and keep the Contact as Request-URI.
+func TestInboundIgnoreLocalAddrInContact(t *testing.T) {
+	st := NewServiceTest(t, nil)
+	st.Manager.conf.IgnoreLocalAddrInContact = true
+	contact := sip.Uri{Scheme: "sip", User: "caller", Host: "192.168.1.10", Port: 5060}
+
+	t.Run("BYE", func(t *testing.T) {
+		call, ic := st.CreateInboundCall(t, withContact(contact))
+		byes := call.RegisterRequestChannel("BYE")
+		require.NoError(t, ic.Close())
+		bye := expectBye(t, byes, 200, "OK")
+		require.Equal(t, contact.Host, bye.Recipient.Host)
+	})
+
+	t.Run("REFER", func(t *testing.T) {
+		call, ic := st.CreateInboundCall(t, withContact(contact))
+		t.Cleanup(func() { ic.Close() })
+		referSink := st.TestUA.RegisterSink(call.localTag, "REFER")
+		defer st.TestUA.UnregisterSink(call.localTag, "REFER")
+
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		go func() {
+			_, _ = ic.transferCall(ctx, "tel:+15551234567", nil, livekit.SIPDialtone_SIP_DIALTONE_DISABLED)
+		}()
+
+		select {
+		case msg := <-referSink:
+			require.Equal(t, sip.REFER, msg.req.Method)
+			require.Equal(t, contact.Host, msg.req.Recipient.Host)
+			_ = msg.tx.Respond(sip.NewResponseFromRequest(msg.req, 202, "Accepted", nil))
+		case <-ctx.Done():
+			require.Fail(t, "REFER did not reach the INVITE source")
+		}
+	})
+}

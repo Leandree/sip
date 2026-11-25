@@ -130,7 +130,9 @@ bugs in trunk matching and dispatch-rule evaluation there.
 - **Low / not a finding:** behaviour that needs the API secret, the operator
   config, Redis, or a malicious LiveKit server; plain RTP being unauthenticated
   by design; source latching when the operator enabled `symmetric_rtp`, or
-  enabled `ignore_local_addr_in_sdp` and the peer's SDP address is private; audio
+  enabled `ignore_local_addr_in_sdp` and the peer's SDP address is private;
+  BYE and REFER going to the INVITE source when the operator enabled
+  `ignore_local_addr_in_contact` and the peer's Contact address is private; audio
   quality, jitter, or call-timing behaviour without a security impact.
 
 ## Testing

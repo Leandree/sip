@@ -133,6 +133,11 @@ type Config struct {
 	IgnoreLocalAddrInSDP   bool            `yaml:"ignore_local_addr_in_sdp"` // enable symmetric RTP if local IP is specified in SDP
 	Codecs                 map[string]bool `yaml:"codecs"`
 
+	// IgnoreLocalAddrInContact sends in-dialog requests (BYE, REFER) of inbound UDP calls to the
+	// address the INVITE came from when the caller's Contact holds a private IP, instead of to that
+	// unreachable Contact. It is the signaling counterpart of IgnoreLocalAddrInSDP.
+	IgnoreLocalAddrInContact bool `yaml:"ignore_local_addr_in_contact"`
+
 	// HideInboundPort controls how SIP endpoint responds to unverified inbound requests.
 	// Setting it to true makes SIP server silently drop INVITE requests if it gets a negative Auth or Dispatch response.
 	// Doing so hides our SIP endpoint from (a low effort) port scanners.

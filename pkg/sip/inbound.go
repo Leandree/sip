@@ -2663,9 +2663,16 @@ func (c *sipInbound) swapSrcDst(req *sip.Request) (fallback string) {
 	if contact := c.invite.Contact(); contact != nil {
 		req.Recipient = contact.Address
 		contactDest := ConvertURI(&contact.Address).GetDest()
-		if c.inviteConnOpen() {
+		switch {
+		case c.inviteConnOpen():
 			fallback = contactDest
-		} else {
+		case c.legTr == TransportUDP && c.cm.conf.IgnoreLocalAddrInContact && c.invite.RecordRoute() == nil &&
+			isPrivateContactBehindNAT(contact.Address.Host, dest):
+			// A PBX behind NAT that does not rewrite its Contact advertises an address we
+			// cannot reach. Keep sending to where the INVITE came from, where responses
+			// already go (RFC 3581), as ignore_local_addr_in_sdp does for RTP.
+			c.log.Infow("ignoring local address in Contact", "contact", contactDest, "addr", dest)
+		default:
 			dest = contactDest
 		}
 	} else {
@@ -2694,6 +2701,21 @@ func (c *sipInbound) swapSrcDst(req *sip.Request) (fallback string) {
 	for req.RemoveHeader("Record-Route") {
 	}
 	return fallback
+}
+
+// isPrivateContactBehindNAT reports whether contactHost is a private IP while src, the address the
+// INVITE came from, is not: the peer sits behind NAT and its Contact cannot be reached from here.
+// Hostnames, public Contacts and peers on a private network are left alone.
+func isPrivateContactBehindNAT(contactHost string, src string) bool {
+	host, err := netip.ParseAddr(strings.Trim(contactHost, "[]"))
+	if err != nil || !host.Unmap().IsPrivate() {
+		return false
+	}
+	addr, err := netip.ParseAddrPort(src)
+	if err != nil {
+		return false
+	}
+	return !addr.Addr().Unmap().IsPrivate()
 }
 
 func (c *sipInbound) generateViaHeader(req *sip.Request) *sip.ViaHeader {
